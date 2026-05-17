@@ -4,15 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-alloy-primitives = { workspace = true }
-bls12_381 = { workspace = true }
-crum_bls = { workspace = true }
+crum_net = { workspace = true }
 crum_pkr = { workspace = true }
-ff = { workspace = true }
-itertools = { workspace = true }
-pairing = { workspace = true }
 rand = { workspace = true }
-rand_core = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 

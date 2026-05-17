@@ -1,0 +1,17 @@
+[network]
+rpc_url = "http://localhost:8547"
+topology = "mesh"
+
+[table]
+mode = "join"
+lobby_id = 1
+table_id = 1
+table_name = "Local P2P Demo"
+buy_in = 0
+max_players = 2
+
+[contracts]
+lobby = "0x7c53aaa661185943f4de195210406949fa5618c6"
+signal = "0x11673b5ef84c5e30898246fbf5499a6080ce50ca"
+verify_shuffle = "0x72219e4c1b76276253a852ab058374d1dd5529be"
+verify_unmasking = "0x3d76278b12ed405618ab335b64979a3c91445efa"

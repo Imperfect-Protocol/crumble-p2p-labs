@@ -1,7 +1,7 @@
 //! Crumble (CRyptographic gaMBLE)
 //!
 //! Mental Poker (1979) implemented using Boneh–Lynn–Shacham (BLS) cryptography.
-//! Designed by the Sonia Code & Gemini AI (2026)
+//! Designed by the Sonia Code & Gemini AI & Open AI (2026)
 //!
 //! Copyright (c) 2026 Sonia Code; See LICENSE file for license details.
 
@@ -50,9 +50,9 @@ pub fn verify_unmasking(masked: G1Affine, unmasked: G1Affine, pk: G2Affine) -> b
 
 /// Verifies that "masked_before" data has been shuffled into "masked_after"
 /// data with signing key corresponding to public key.
-/// 
+///
 /// This is slow brute-force O(N^2) algorithm.
-/// 
+///
 pub fn verify_shuffle(
     masked_before: &[G1Affine],
     masked_after: &[G1Affine],
@@ -107,9 +107,9 @@ pub struct ShuffleTrace {
 
 /// Verifies that "masked_before" data has been shuffled into "masked_after"
 /// data with signing key corresponding to public key.
-/// 
+///
 /// This is efficient O(M) algorithm using only single Final Exponentiation call.
-/// 
+///
 pub fn verify_shuffle_traced(
     masked_before: &[G1Affine],
     masked_after: &[G1Affine],
@@ -129,7 +129,8 @@ pub fn verify_shuffle_traced(
 
     for trace in traces {
         // Prevent out-of-bounds panics
-        if trace.after_index >= masked_after.len() || trace.claimed_before_index >= masked_before.len()
+        if trace.after_index >= masked_after.len()
+            || trace.claimed_before_index >= masked_before.len()
         {
             return Err("Trace index out of bounds");
         }

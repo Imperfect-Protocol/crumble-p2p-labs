@@ -1,19 +1,23 @@
+//! Crumble (CRyptographic gaMBLE)
+//!
+//! Mental Poker (1979) implemented using Boneh–Lynn–Shacham (BLS) cryptography.
+//! Designed by the Sonia Code & Gemini AI & Open AI (2026)
+//!
+//! Copyright (c) 2026 Sonia Code; See LICENSE file for license details.
+
 use super::poker_hand::PokerHand;
 use pairing::{MultiMillerLoop, group::Group};
 
-use crate::
-    poker_state::{
-        POKER_HAND_STATE_CHEATED,
-        POKER_HAND_STATE_UNMASK_COMMUNITY_CARDS,
-        POKER_HAND_STATE_UNMASK_HOLE_CARDS, POKER_HAND_STATE_UNMASK_SHOWDOWN,
-    }
-;
+use crate::poker_state::{
+    POKER_HAND_STATE_CHEATED, POKER_HAND_STATE_UNMASK_COMMUNITY_CARDS,
+    POKER_HAND_STATE_UNMASK_HOLE_CARDS, POKER_HAND_STATE_UNMASK_SHOWDOWN,
+};
 
 impl PokerHand {
     /// Replay and verify whole unmasking history.
-    /// 
+    ///
     /// This is efficient algorithm using only single Final Exponentiation call.
-    /// 
+    ///
     pub fn verify_unmasking(&mut self) -> Result<Option<usize>, Vec<u8>> {
         let final_shuffled_deck = self
             .shuffle_history
