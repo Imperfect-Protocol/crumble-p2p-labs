@@ -63,9 +63,8 @@ impl PokerBot {
         Ok(())
     }
 
-    pub fn mark_connected(&mut self) -> Result<(), String> {
-        self.current_game_mut()?.mark_connected();
-        Ok(())
+    pub fn mark_connected(&mut self) -> Result<bool, String> {
+        Ok(self.current_game_mut()?.mark_connected())
     }
 
     pub fn on_hand_started(&mut self, event: &HandStartedOnChain) -> Result<bool, String> {
@@ -74,6 +73,15 @@ impl PokerBot {
 
     pub fn should_tick(&self) -> Result<bool, String> {
         Ok(self.current_game()?.should_tick())
+    }
+
+    pub fn has_pending_ring_action(&self) -> Result<bool, String> {
+        Ok(self.current_game()?.has_pending_ring_action())
+    }
+
+    pub fn observe_ring_action(&mut self, wire: &PokerActionEnvelopeWire) -> Result<(), String> {
+        self.current_game_mut()?.observe_ring_action(wire);
+        Ok(())
     }
 
     pub fn should_act(

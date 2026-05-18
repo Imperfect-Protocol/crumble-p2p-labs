@@ -513,12 +513,13 @@ impl<'player> PokerPeerToPeerRuntime<'player> {
                     .await?;
             }
             SignallingOutcome::ConnectionEstablished => {
-                chain
-                    .hand_client
-                    .start_hand(chain.lobby_id, chain.table_id)
-                    .await?;
-                self.player_mut()?.mark_connected()?;
-                tracing::info!("called startHand for Player {}", player_index + 1);
+                if self.player_mut()?.mark_connected()? {
+                    chain
+                        .hand_client
+                        .start_hand(chain.lobby_id, chain.table_id)
+                        .await?;
+                    tracing::info!("called startHand for Player {}", player_index + 1);
+                }
             }
         }
         Ok(())
@@ -599,6 +600,7 @@ impl<'player> PokerPeerToPeerRuntime<'player> {
             .client_state_mut()?
             .apply_envelope(envelope)
             .map_err(|err| format!("failed to apply poker action: 0x{}", hex::encode(err)))?;
+        self.player_mut()?.observe_ring_action(&wire)?;
         if applied {
             for line in wire.log_lines {
                 println!("{line}");
@@ -609,6 +611,17 @@ impl<'player> PokerPeerToPeerRuntime<'player> {
     }
 
     async fn tick_poker(&mut self, player_index: usize) -> Result<bool, String> {
+        if is_finished(&self.player()?.client_state()?.table).map_err(|err| err.to_string())?
+            && !self.player()?.has_pending_ring_action()?
+        {
+            for line in
+                final_lines(&self.player()?.client_state()?.table).map_err(|err| err.to_string())?
+            {
+                println!("{line}");
+            }
+            return Ok(true);
+        }
+
         let acting_player =
             current_player(&self.player()?.client_state()?.table).map_err(|err| err.to_string())?;
         let can_send = self.connector.can_send();
@@ -621,14 +634,6 @@ impl<'player> PokerPeerToPeerRuntime<'player> {
                 println!("{line}");
             }
             self.send_action(wire).await?;
-        }
-        if is_finished(&self.player()?.client_state()?.table).map_err(|err| err.to_string())? {
-            for line in
-                final_lines(&self.player()?.client_state()?.table).map_err(|err| err.to_string())?
-            {
-                println!("{line}");
-            }
-            return Ok(true);
         }
         Ok(false)
     }

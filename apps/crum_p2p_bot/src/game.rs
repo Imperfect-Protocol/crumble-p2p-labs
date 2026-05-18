@@ -6,8 +6,9 @@
 //! Copyright (c) 2026 Sonia Code; See LICENSE file for license details.
 
 use crum_net::{
-    NetworkConnector, PlayerEvent, PokerAction, PokerActionEnvelopeWire, PokerBotLogic,
-    PokerBotLogicError, PokerClientState, PokerGameClientState, PokerGameState, PokerLobby,
+    NetworkConnector, PlayerEvent, PlayerIndex, PokerAction, PokerActionEnvelopeWire,
+    PokerBotLogic, PokerBotLogicError, PokerClientState, PokerGameClientState, PokerGameState,
+    PokerLobby, Sequence,
 };
 use crum_pkr::poker_table::PokerTable;
 
@@ -75,6 +76,8 @@ pub struct PokerBotGame {
     lobby: PokerArbitrumGameLobby,
     logic: PokerBotLogic,
     sent_connection_info: bool,
+    called_start_hand: bool,
+    pending_ring_action: Option<(PlayerIndex, Sequence)>,
     playing: bool,
 }
 
@@ -85,6 +88,8 @@ impl PokerBotGame {
             lobby,
             logic: PokerBotLogic::new(),
             sent_connection_info: false,
+            called_start_hand: false,
+            pending_ring_action: None,
             playing: false,
         }
     }
@@ -143,7 +148,9 @@ impl PokerBotGame {
         self.logic
             .act(&mut state, events)
             .map_err(|err| err.to_string())?;
-        state.into_wire()
+        let (wire, log_lines) = state.into_wire()?;
+        self.pending_ring_action = Some((wire.from, wire.sequence));
+        Ok((wire, log_lines))
     }
 
     pub fn should_publish_connection_info(&self) -> bool {
@@ -154,8 +161,13 @@ impl PokerBotGame {
         self.sent_connection_info = true;
     }
 
-    pub fn mark_connected(&mut self) {
+    pub fn mark_connected(&mut self) -> bool {
+        if self.called_start_hand {
+            return false;
+        }
+        self.called_start_hand = true;
         self.session.connector.mark_connected();
+        true
     }
 
     pub fn on_hand_started(&mut self, event: &HandStartedOnChain) -> bool {
@@ -169,6 +181,16 @@ impl PokerBotGame {
 
     pub fn should_tick(&self) -> bool {
         self.playing
+    }
+
+    pub fn has_pending_ring_action(&self) -> bool {
+        self.pending_ring_action.is_some()
+    }
+
+    pub fn observe_ring_action(&mut self, wire: &PokerActionEnvelopeWire) {
+        if self.pending_ring_action == Some((wire.from, wire.sequence)) {
+            self.pending_ring_action = None;
+        }
     }
 
     pub fn should_act(&self, acting_player: usize, player_index: usize, can_send: bool) -> bool {
