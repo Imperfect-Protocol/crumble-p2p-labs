@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crum_net::{HAND_ID, LobbyId, PokerClientState, PokerNetwork, TABLE_ID, TableId, new_table};
+use crum_net::{HAND_ID, LobbyId, PokerClientState, TABLE_ID, TableId, new_table};
 
 use crate::network::NetworkError;
 
@@ -28,18 +28,12 @@ pub struct ClientServerTableRecord {
     pub name: String,
 }
 
-pub struct PokerClientServerLobby<N>
-where
-    N: PokerNetwork<Error = NetworkError>,
-{
+pub struct PokerClientServerLobby<N> {
     network: N,
     lobbies: HashMap<LobbyId, ClientServerLobbyRecord>,
 }
 
-impl<N> PokerClientServerLobby<N>
-where
-    N: PokerNetwork<Error = NetworkError>,
-{
+impl<N> PokerClientServerLobby<N> {
     pub fn use_network(network: N) -> Self {
         let mut lobby = Self {
             network,
@@ -49,16 +43,16 @@ where
         lobby
     }
 
-    pub fn create_table(&mut self, player_index: usize) -> Result<(), NetworkError> {
+    pub fn create_table(&mut self, player_index: usize) -> Result<PokerClientState, NetworkError> {
         self.put_table(DEFAULT_LOBBY_ID, TABLE_ID, "Heads-Up Demo Table");
-        self.use_table_state(player_index)
+        Self::table_state(player_index)
     }
 
-    pub fn join_table(&mut self, player_index: usize) -> Result<(), NetworkError> {
+    pub fn join_table(&mut self, player_index: usize) -> Result<PokerClientState, NetworkError> {
         if self.table(DEFAULT_LOBBY_ID, TABLE_ID).is_none() {
             self.put_table(DEFAULT_LOBBY_ID, TABLE_ID, "Heads-Up Demo Table");
         }
-        self.use_table_state(player_index)
+        Self::table_state(player_index)
     }
 
     pub fn into_network(self) -> N {
@@ -99,13 +93,12 @@ where
         }
     }
 
-    fn use_table_state(&mut self, player_index: usize) -> Result<(), NetworkError> {
-        self.network.install_poker_state(PokerClientState::new(
+    fn table_state(player_index: usize) -> Result<PokerClientState, NetworkError> {
+        Ok(PokerClientState::new(
             player_index,
             TABLE_ID,
             HAND_ID,
             new_table()?,
-        ))?;
-        self.network.mark_table_ready()
+        ))
     }
 }

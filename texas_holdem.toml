@@ -1,0 +1,7 @@
+[table]
+game_type = "texas_holdem"
+buy_in = 0
+small_blind = 10
+big_blind = 20
+num_players = 3
+topology = "ring"

@@ -5,13 +5,12 @@
 //!
 //! Copyright (c) 2026 Sonia Code; See LICENSE file for license details.
 
-use crum_net::PokerBot;
 use crum_p2p_bot::{
+    bot::PokerBot,
     config::{BotConfig, BotMode, CliOptions, usage},
     identity::derive_bls_identity,
-    lobby::{PokerArbitrumDetails, PokerArbitrumLobby},
-    network::{PokerPeerToPeerConnector, PokerPeerToPeerNetwork, PokerPeerToPeerPlayerDetails},
-    table_registry::{default_registry_path, remember_table, resolve_table},
+    lobby::{PokerArbitrumBotExt, PokerArbitrumDetails, PokerArbitrumLobby},
+    network::{PeerToPeerNetwork, PokerPeerToPeerConnector, PokerPeerToPeerPlayerDetails},
 };
 
 #[tokio::main]
@@ -74,33 +73,43 @@ async fn run() -> Result<(), String> {
         "stun:stun.l.google.com:19302",
         PokerPeerToPeerPlayerDetails {
             annonce_public_key_hex: bls_identity.public_key_hex,
+            annonce_private_key_hex: bls_identity.private_key_hex,
         },
     );
-    let network = PokerPeerToPeerNetwork::use_connector(connector)
-        .with_topology(config.topology, config.max_players);
+    let network = PeerToPeerNetwork::use_connector(connector).with_topology(config.topology);
     let details =
-        PokerArbitrumDetails::new(config.rpc_url.clone(), private_key, lobby_address, lobby_id);
+        PokerArbitrumDetails::new(config.rpc_url.clone(), private_key, lobby_address, lobby_id)
+            .with_signal_address(config.contracts.signal.clone());
     let mut lobby = PokerArbitrumLobby::use_network(network, details).await?;
 
     match config.mode {
         BotMode::Create => {
             let table_name = config.table_name.as_deref().ok_or_else(|| {
-                "missing table name; pass --create-table NAME or --table-name NAME".to_string()
+                "missing table name; pass --table-name NAME with --create-table TABLE_TOML_PATH"
+                    .to_string()
             })?;
             let buy_in = config.buy_in.unwrap_or(0);
-            let created = lobby.create_table(table_name, buy_in).await?;
+            let num_players = config
+                .num_players
+                .ok_or_else(|| "missing num_players; set table.num_players in the table TOML or pass --num-players".to_string())?;
+            let created = bot
+                .create_table(&mut lobby, table_name, buy_in, num_players)
+                .await?;
             println!(
                 "Created table id={} lobby={}",
                 created.table_id, created.lobby_id
             );
-            if let Err(err) = remember_table(&default_registry_path(), table_name, created.table_id)
-            {
-                tracing::warn!("failed to remember table name `{table_name}`: {err}");
-            }
         }
         BotMode::Join => {
-            let table_id = resolve_join_table_id(&config)?;
-            let joined = lobby.join_table(table_id).await?;
+            let joined = if let Some(table_id) = config.table_id {
+                bot.join_table(&mut lobby, table_id).await?
+            } else {
+                let table_name = config.table_name.as_deref().ok_or_else(|| {
+                    "missing table name; pass --join-table --table-name TABLE_NAME --lobby-id LOBBY_ID"
+                        .to_string()
+                })?;
+                bot.join_table_by_name(&mut lobby, table_name).await?
+            };
             println!(
                 "Joined table id={} lobby={}",
                 joined.table_id, joined.lobby_id
@@ -108,29 +117,7 @@ async fn run() -> Result<(), String> {
         }
     }
 
-    let mut network = lobby.into_network();
-    bot.handle_actions(&mut network)?;
-    network.run().await?;
+    lobby.run().await?;
 
     Ok(())
-}
-
-fn resolve_join_table_id(config: &BotConfig) -> Result<u64, String> {
-    if let Some(table_id) = config.table_id {
-        return Ok(table_id);
-    }
-
-    let Some(table_name) = config.table_name.as_deref() else {
-        return Err(
-            "missing table id or name; pass --join-table TABLE_ID_OR_NAME or --table-id TABLE_ID"
-                .to_string(),
-        );
-    };
-
-    resolve_table(&default_registry_path(), table_name)?.ok_or_else(|| {
-        format!(
-            "table `{table_name}` is not in {}; create it first in this working directory or pass --table-id",
-            default_registry_path().display()
-        )
-    })
 }

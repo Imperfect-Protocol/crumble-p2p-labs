@@ -1,0 +1,15 @@
+[network]
+rpc_url = "http://localhost:8547"
+topology = "ring"
+
+[wallet]
+# Prefer passing this on the command line with --private-key.
+# private_key = "0x..."
+
+[contracts]
+# Fill these from privatepoker-contracts/scripts/deploy-privatepoker.sh output or export
+# PP_LOBBY, PP_SIGNAL, PP_VERIFY_SHUFFLE, PP_VERIFY_UNMASKING in the shell.
+# lobby = "0x..."
+# signal = "0x..."
+# verify_shuffle = "0x..."
+# verify_unmasking = "0x..."

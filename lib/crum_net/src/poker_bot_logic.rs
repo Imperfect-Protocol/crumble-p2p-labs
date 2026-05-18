@@ -26,29 +26,29 @@ use rand::{
 use crate::{Player, PlayerEvent, PokerAction, PokerGameState, PokerPlayerRegistrar};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PokerBotError(String);
+pub struct PokerBotLogicError(String);
 
-impl fmt::Display for PokerBotError {
+impl fmt::Display for PokerBotLogicError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
-impl Error for PokerBotError {}
+impl Error for PokerBotLogicError {}
 
-impl From<String> for PokerBotError {
+impl From<String> for PokerBotLogicError {
     fn from(value: String) -> Self {
         Self(value)
     }
 }
 
-impl From<&str> for PokerBotError {
+impl From<&str> for PokerBotLogicError {
     fn from(value: &str) -> Self {
         Self(value.to_string())
     }
 }
 
-impl From<Vec<u8>> for PokerBotError {
+impl From<Vec<u8>> for PokerBotLogicError {
     fn from(value: Vec<u8>) -> Self {
         Self(
             String::from_utf8(value)
@@ -57,14 +57,14 @@ impl From<Vec<u8>> for PokerBotError {
     }
 }
 
-pub struct PokerBot {
+pub struct PokerBotLogic {
     player_index: Option<usize>,
     sk: SigningKey,
     rng: StdRng,
     shuffle_trace: Option<Vec<verify::ShuffleTrace>>,
 }
 
-impl PokerBot {
+impl PokerBotLogic {
     pub fn new() -> Self {
         let mut seed = [0u8; 32];
         seed[0] = 1;
@@ -87,18 +87,18 @@ impl PokerBot {
         self.shuffle_trace = None;
     }
 
-    pub fn player_index(&self) -> Result<usize, PokerBotError> {
+    pub fn player_index(&self) -> Result<usize, PokerBotLogicError> {
         self.player_index
-            .ok_or_else(|| PokerBotError::from("bot has not been seated at a table"))
+            .ok_or_else(|| PokerBotLogicError::from("bot has not been seated at a table"))
     }
 
     pub fn act<State>(
         &mut self,
         state: &mut State,
         _events: &[PlayerEvent],
-    ) -> Result<(), PokerBotError>
+    ) -> Result<(), PokerBotLogicError>
     where
-        State: PokerGameState<Error = PokerBotError>,
+        State: PokerGameState<Error = PokerBotLogicError>,
     {
         let (action, log_lines) = self.build_action(state.table())?;
         state.submit_action(action, log_lines)
@@ -117,9 +117,9 @@ impl PokerBot {
     fn build_action(
         &mut self,
         poker_table: &PokerTable,
-    ) -> Result<(PokerAction, Vec<String>), PokerBotError> {
+    ) -> Result<(PokerAction, Vec<String>), PokerBotLogicError> {
         let Some(hand) = poker_table.get_current_hand() else {
-            return Err(PokerBotError::from("No active hand to act upon"));
+            return Err(PokerBotLogicError::from("No active hand to act upon"));
         };
 
         let poker_state = hand.get_current_state().to_enum();
@@ -170,7 +170,7 @@ impl PokerBot {
                 } else {
                     let weights = [1, 4, 8];
                     let dist = WeightedIndex::new(&weights)
-                        .map_err(|_| PokerBotError::from("Failed to create weighted index"))?;
+                        .map_err(|_| PokerBotLogicError::from("Failed to create weighted index"))?;
                     let action = self.rng.sample(dist);
                     match action {
                         0 => 0,
@@ -219,7 +219,7 @@ impl PokerBot {
             PokerHandStateEnum::UnmaskCommunityCards { round, player } => {
                 self.ensure_my_turn(player)?;
                 let Some(mut cards) = hand.get_community_cards(round).cloned() else {
-                    return Err(PokerBotError::from("No community cards for round"));
+                    return Err(PokerBotLogicError::from("No community cards for round"));
                 };
                 cards.unmask(self.sk);
 
@@ -240,7 +240,9 @@ impl PokerBot {
                 self.ensure_my_turn(player)?;
                 let mut cards = hand.get_player_cards().clone();
                 if cards.get_mut(player).map(|c| c.unmask(self.sk)).is_none() {
-                    return Err(PokerBotError::from("Invalid player cards for showdown"));
+                    return Err(PokerBotLogicError::from(
+                        "Invalid player cards for showdown",
+                    ));
                 }
 
                 Ok((
@@ -252,7 +254,7 @@ impl PokerBot {
                 self.ensure_my_turn(player)?;
                 let public_key = make_public_key_from_signing_key(&self.sk);
                 let Some(traces) = self.shuffle_trace.take() else {
-                    return Err(PokerBotError::from("No shuffle trace"));
+                    return Err(PokerBotLogicError::from("No shuffle trace"));
                 };
 
                 Ok((
@@ -264,21 +266,21 @@ impl PokerBot {
                     vec![format!("Submit Public Key on Player {}", player + 1)],
                 ))
             }
-            PokerHandStateEnum::Finished => Err(PokerBotError::from("Hand is finished")),
-            PokerHandStateEnum::Cheated { player } => Err(PokerBotError::from(format!(
+            PokerHandStateEnum::Finished => Err(PokerBotLogicError::from("Hand is finished")),
+            PokerHandStateEnum::Cheated { player } => Err(PokerBotLogicError::from(format!(
                 "Cheated by Player {}",
                 player + 1
             ))),
-            PokerHandStateEnum::Invalid => Err(PokerBotError::from("Invalid poker state")),
+            PokerHandStateEnum::Invalid => Err(PokerBotLogicError::from("Invalid poker state")),
         }
     }
 
-    fn ensure_my_turn(&self, player: usize) -> Result<(), PokerBotError> {
+    fn ensure_my_turn(&self, player: usize) -> Result<(), PokerBotLogicError> {
         let player_index = self.player_index()?;
         if player == player_index {
             Ok(())
         } else {
-            Err(PokerBotError::from(format!(
+            Err(PokerBotLogicError::from(format!(
                 "Player {} tried to act for Player {}",
                 player_index + 1,
                 player + 1
@@ -287,20 +289,20 @@ impl PokerBot {
     }
 }
 
-impl Default for PokerBot {
+impl Default for PokerBotLogic {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<State> Player<State, PlayerEvent> for PokerBot
+impl<State> Player<State, PlayerEvent> for PokerBotLogic
 where
-    State: PokerGameState<Error = PokerBotError>,
+    State: PokerGameState<Error = PokerBotLogicError>,
 {
-    type Error = PokerBotError;
+    type Error = PokerBotLogicError;
 
     fn act(&mut self, state: &mut State, events: &[PlayerEvent]) -> Result<(), Self::Error> {
-        PokerBot::act(self, state, events)
+        PokerBotLogic::act(self, state, events)
     }
 }
 
@@ -310,32 +312,36 @@ pub const SMALL_BLIND: u64 = 10;
 pub const TABLE_ID: u64 = 1;
 pub const HAND_ID: u64 = 1;
 
-pub fn new_table() -> Result<PokerTable, PokerBotError> {
-    let mut poker_table = PokerTable::new(NUM_PLAYERS, POKER_HOLDEM_ROUNDS);
-    for player_id in 1..=NUM_PLAYERS {
+pub fn new_table() -> Result<PokerTable, PokerBotLogicError> {
+    new_table_with_players(NUM_PLAYERS)
+}
+
+pub fn new_table_with_players(num_players: usize) -> Result<PokerTable, PokerBotLogicError> {
+    let mut poker_table = PokerTable::new(num_players, POKER_HOLDEM_ROUNDS);
+    for player_id in 1..=num_players {
         poker_table.join(player_id as u32);
     }
     poker_table.start_hand(INITIAL_CHIPS, SMALL_BLIND)?;
     Ok(poker_table)
 }
 
-pub fn current_player(poker_table: &PokerTable) -> Result<usize, PokerBotError> {
+pub fn current_player(poker_table: &PokerTable) -> Result<usize, PokerBotLogicError> {
     poker_table
         .get_current_hand()
         .map(|hand| hand.get_current_state().get_current_player())
-        .ok_or_else(|| PokerBotError::from("Hand not started"))
+        .ok_or_else(|| PokerBotLogicError::from("Hand not started"))
 }
 
-pub fn is_finished(poker_table: &PokerTable) -> Result<bool, PokerBotError> {
+pub fn is_finished(poker_table: &PokerTable) -> Result<bool, PokerBotLogicError> {
     poker_table
         .get_current_hand()
         .map(|hand| hand.get_current_state().is_finished())
-        .ok_or_else(|| PokerBotError::from("Hand not started"))
+        .ok_or_else(|| PokerBotLogicError::from("Hand not started"))
 }
 
-pub fn final_lines(poker_table: &PokerTable) -> Result<Vec<String>, PokerBotError> {
+pub fn final_lines(poker_table: &PokerTable) -> Result<Vec<String>, PokerBotLogicError> {
     let Some(hand) = poker_table.get_current_hand() else {
-        return Err(PokerBotError::from("Hand not started"));
+        return Err(PokerBotLogicError::from("Hand not started"));
     };
 
     let mut lines = Vec::new();

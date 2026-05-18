@@ -9,6 +9,7 @@ pub mod hash_to_curve;
 pub mod identity;
 pub mod lagrange;
 pub mod sign;
+pub mod signal_crypto;
 pub mod types;
 pub mod util;
 pub mod verify;

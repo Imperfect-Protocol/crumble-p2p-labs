@@ -5,9 +5,10 @@
 //!
 //! Copyright (c) 2026 Sonia Code; See LICENSE file for license details.
 
+pub mod bot;
 pub mod chain;
 pub mod config;
+pub mod game;
 pub mod identity;
 pub mod lobby;
 pub mod network;
-pub mod table_registry;

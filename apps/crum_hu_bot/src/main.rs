@@ -10,9 +10,167 @@ mod network;
 
 use std::env;
 
-use crum_net::PokerBot;
+use crum_net::{
+    Player, PlayerEvent, PokerAction, PokerActionEnvelopeWire, PokerBotLogic, PokerBotLogicError,
+    PokerClientState, PokerGameState, PokerPlayerRegistrar,
+};
+use crum_pkr::poker_table::PokerTable;
 use lobby::PokerClientServerLobby;
-use network::{PokerClient, PokerClientServerNetwork, PokerServer};
+use network::{NetworkError, PokerClient, PokerClientServerNetwork, PokerServer};
+
+pub struct PokerGameSession {
+    state: PokerClientState,
+}
+
+pub struct PokerBotGame {
+    session: PokerGameSession,
+    logic: PokerBotLogic,
+}
+
+impl PokerBotGame {
+    pub fn new(state: PokerClientState, player_index: usize) -> Self {
+        let mut logic = PokerBotLogic::new();
+        logic.seat_as(player_index);
+        Self {
+            session: PokerGameSession { state },
+            logic,
+        }
+    }
+
+    pub fn player_index(&self) -> usize {
+        self.session.state.player_index
+    }
+
+    pub fn client_state(&self) -> &PokerClientState {
+        &self.session.state
+    }
+
+    pub fn client_state_mut(&mut self) -> &mut PokerClientState {
+        &mut self.session.state
+    }
+
+    pub fn act(
+        &mut self,
+        events: &[PlayerEvent],
+    ) -> Result<(PokerActionEnvelopeWire, Vec<String>), NetworkError> {
+        let mut state = PokerBotGameState::new(&mut self.session.state);
+        self.logic
+            .act(&mut state, events)
+            .map_err(NetworkError::from)?;
+        state.into_wire()
+    }
+}
+
+pub struct PokerBot {
+    games: Vec<PokerBotGame>,
+}
+
+impl PokerBot {
+    pub fn new() -> Self {
+        Self { games: Vec::new() }
+    }
+
+    pub fn track_game(&mut self, state: PokerClientState, player_index: usize) {
+        self.games.push(PokerBotGame::new(state, player_index));
+    }
+
+    pub fn current_game(&self) -> Result<&PokerBotGame, NetworkError> {
+        self.games
+            .first()
+            .ok_or_else(|| NetworkError::from("bot has no poker game"))
+    }
+
+    pub fn current_game_mut(&mut self) -> Result<&mut PokerBotGame, NetworkError> {
+        self.games
+            .first_mut()
+            .ok_or_else(|| NetworkError::from("bot has no poker game"))
+    }
+
+    pub fn player_index(&self) -> Result<usize, NetworkError> {
+        Ok(self.current_game()?.player_index())
+    }
+
+    pub fn client_state(&self) -> Result<&PokerClientState, NetworkError> {
+        Ok(self.current_game()?.client_state())
+    }
+
+    pub fn client_state_mut(&mut self) -> Result<&mut PokerClientState, NetworkError> {
+        Ok(self.current_game_mut()?.client_state_mut())
+    }
+
+    pub fn act_current_game(
+        &mut self,
+        events: &[PlayerEvent],
+    ) -> Result<(PokerActionEnvelopeWire, Vec<String>), NetworkError> {
+        self.current_game_mut()?.act(events)
+    }
+
+    pub fn handle_actions<'player, Network>(
+        &'player mut self,
+        network: &mut Network,
+    ) -> Result<(), Network::Error>
+    where
+        Network: PokerPlayerRegistrar<'player, Self>,
+    {
+        network.register_player(self)
+    }
+}
+
+impl<State> Player<State, PlayerEvent> for PokerBot
+where
+    State: PokerGameState<Error = PokerBotLogicError>,
+{
+    type Error = PokerBotLogicError;
+
+    fn act(&mut self, state: &mut State, events: &[PlayerEvent]) -> Result<(), Self::Error> {
+        self.current_game_mut()
+            .map_err(|err| PokerBotLogicError::from(err.to_string()))?
+            .logic
+            .act(state, events)
+    }
+}
+
+pub struct PokerBotGameState<'state> {
+    client_state: &'state mut PokerClientState,
+    wire: Option<PokerActionEnvelopeWire>,
+    log_lines: Vec<String>,
+}
+
+impl<'state> PokerBotGameState<'state> {
+    fn new(client_state: &'state mut PokerClientState) -> Self {
+        Self {
+            client_state,
+            wire: None,
+            log_lines: Vec::new(),
+        }
+    }
+
+    fn into_wire(self) -> Result<(PokerActionEnvelopeWire, Vec<String>), NetworkError> {
+        let wire = self
+            .wire
+            .ok_or_else(|| NetworkError::from("player did not submit an action"))?;
+        Ok((wire, self.log_lines))
+    }
+}
+
+impl PokerGameState for PokerBotGameState<'_> {
+    type Error = PokerBotLogicError;
+
+    fn table(&self) -> &PokerTable {
+        &self.client_state.table
+    }
+
+    fn submit_action(
+        &mut self,
+        action: PokerAction,
+        log_lines: Vec<String>,
+    ) -> Result<(), Self::Error> {
+        let envelope = self.client_state.submit_local_action(action)?;
+        self.wire = Some(envelope.to_wire(log_lines.clone()));
+        self.log_lines = log_lines;
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 enum Mode {
@@ -51,16 +209,11 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut lobby = PokerClientServerLobby::use_network(network);
-    match mode {
-        Mode::Listen => {
-            bot.seat_as(0);
-            lobby.create_table(0)?;
-        }
-        Mode::Connect => {
-            bot.seat_as(1);
-            lobby.join_table(1)?;
-        }
-    }
+    let (state, player_index) = match mode {
+        Mode::Listen => (lobby.create_table(0)?, 0),
+        Mode::Connect => (lobby.join_table(1)?, 1),
+    };
+    bot.track_game(state, player_index);
 
     let mut network = lobby.into_network();
     bot.handle_actions(&mut network)?;

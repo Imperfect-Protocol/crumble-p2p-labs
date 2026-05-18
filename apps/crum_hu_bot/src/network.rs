@@ -8,10 +8,9 @@
 use std::{error::Error, fmt, net::SocketAddr};
 
 use crum_net::{
-    Player, PlayerEvent, PokerAction, PokerActionEnvelopeWire, PokerBotError, PokerClientState,
-    PokerGameState, PokerNetwork, PokerPlayerRegistrar, current_player, final_lines, is_finished,
+    PlayerEvent, PokerActionEnvelopeWire, PokerBotLogicError, PokerPlayerRegistrar, current_player,
+    final_lines, is_finished,
 };
-use crum_pkr::poker_table::PokerTable;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{
@@ -20,13 +19,7 @@ use tokio::{
     },
 };
 
-type PlayerCallback<'player> = Box<
-    dyn FnMut(
-            &mut PokerClientState,
-            &[PlayerEvent],
-        ) -> Result<(PokerActionEnvelopeWire, Vec<String>), NetworkError>
-        + 'player,
->;
+use crate::PokerBot;
 
 #[derive(Debug)]
 pub struct PokerServer {
@@ -71,8 +64,7 @@ pub enum PokerClientServerNetwork<'player> {
 
 pub struct PokerClientServerRuntime<'player> {
     endpoint: PokerEndpoint,
-    client_state: Option<PokerClientState>,
-    player: Option<PlayerCallback<'player>>,
+    player: Option<&'player mut PokerBot>,
     reader: Option<BufReader<OwnedReadHalf>>,
     writer: Option<OwnedWriteHalf>,
 }
@@ -81,7 +73,6 @@ impl<'player> PokerClientServerNetwork<'player> {
     pub async fn use_server(server: PokerServer) -> Result<Self, NetworkError> {
         let mut network = PokerClientServerRuntime {
             endpoint: PokerEndpoint::Server(server),
-            client_state: None,
             player: None,
             reader: None,
             writer: None,
@@ -93,7 +84,6 @@ impl<'player> PokerClientServerNetwork<'player> {
     pub async fn use_client(client: PokerClient) -> Result<Self, NetworkError> {
         let mut network = PokerClientServerRuntime {
             endpoint: PokerEndpoint::Client(client),
-            client_state: None,
             player: None,
             reader: None,
             writer: None,
@@ -102,20 +92,12 @@ impl<'player> PokerClientServerNetwork<'player> {
         Ok(Self::NetworkClient(network))
     }
 
-    pub fn register_player<P>(&mut self, player: &'player mut P) -> Result<(), NetworkError>
-    where
-        P: for<'state> Player<NetworkPokerGameState<'state>, PlayerEvent, Error = PokerBotError>
-            + 'player,
-    {
+    pub fn register_player(&mut self, player: &'player mut PokerBot) -> Result<(), NetworkError> {
         self.runtime_mut().register_player(player)
     }
 
     pub async fn run(&mut self) -> Result<(), NetworkError> {
         self.runtime_mut().run().await
-    }
-
-    pub fn set_client_state(&mut self, client_state: PokerClientState) {
-        self.runtime_mut().set_client_state(client_state);
     }
 
     fn runtime_mut(&mut self) -> &mut PokerClientServerRuntime<'player> {
@@ -125,49 +107,22 @@ impl<'player> PokerClientServerNetwork<'player> {
     }
 }
 
-impl PokerNetwork for PokerClientServerNetwork<'_> {
+impl<'player> PokerPlayerRegistrar<'player, PokerBot> for PokerClientServerNetwork<'player> {
     type Error = NetworkError;
 
-    fn install_poker_state(&mut self, state: PokerClientState) -> Result<(), Self::Error> {
-        self.set_client_state(state);
-        Ok(())
-    }
-
-    fn mark_table_ready(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl<'player, P> PokerPlayerRegistrar<'player, P> for PokerClientServerNetwork<'player>
-where
-    P: for<'state> Player<NetworkPokerGameState<'state>, PlayerEvent, Error = PokerBotError>
-        + 'player,
-{
-    type Error = NetworkError;
-
-    fn register_player(&mut self, player: &'player mut P) -> Result<(), Self::Error> {
+    fn register_player(&mut self, player: &'player mut PokerBot) -> Result<(), Self::Error> {
         PokerClientServerNetwork::register_player(self, player)
     }
 }
 
 impl<'player> PokerClientServerRuntime<'player> {
-    pub fn register_player<P>(&mut self, player: &'player mut P) -> Result<(), NetworkError>
-    where
-        P: for<'state> Player<NetworkPokerGameState<'state>, PlayerEvent, Error = PokerBotError>
-            + 'player,
-    {
+    pub fn register_player(&mut self, player: &'player mut PokerBot) -> Result<(), NetworkError> {
         if self.player.is_some() {
             return Err(NetworkError::from(
                 "network already has a registered player",
             ));
         }
-        self.player = Some(Box::new(move |client_state, events| {
-            let mut game_state = NetworkPokerGameState::new(client_state);
-            player
-                .act(&mut game_state, events)
-                .map_err(NetworkError::from)?;
-            game_state.into_wire()
-        }));
+        self.player = Some(player);
         Ok(())
     }
 
@@ -201,18 +156,18 @@ impl<'player> PokerClientServerRuntime<'player> {
 
     pub async fn run(&mut self) -> Result<(), NetworkError> {
         self.connect().await?;
-        let player_index = self.client_state()?.player_index;
+        let player_index = self.player()?.player_index()?;
         tracing::info!("Starting gameplay as Player {}", player_index + 1);
 
         loop {
-            if is_finished(&self.client_state()?.table)? {
-                for line in final_lines(&self.client_state()?.table)? {
+            if is_finished(&self.player()?.client_state()?.table)? {
+                for line in final_lines(&self.player()?.client_state()?.table)? {
                     println!("{line}");
                 }
                 break;
             }
 
-            let acting_player = current_player(&self.client_state()?.table)?;
+            let acting_player = current_player(&self.player()?.client_state()?.table)?;
             if acting_player == player_index {
                 let (wire, log_lines) = self.call_player_act(&[PlayerEvent::Tick])?;
                 for line in &log_lines {
@@ -222,7 +177,9 @@ impl<'player> PokerClientServerRuntime<'player> {
             } else {
                 let wire = self.receive_action().await?;
                 let envelope = wire.to_envelope().map_err(NetworkError::from)?;
-                self.client_state_mut()?.apply_envelope(envelope)?;
+                self.player_mut()?
+                    .client_state_mut()?
+                    .apply_envelope(envelope)?;
                 for line in wire.log_lines {
                     println!("{line}");
                 }
@@ -232,20 +189,16 @@ impl<'player> PokerClientServerRuntime<'player> {
         Ok(())
     }
 
-    pub fn set_client_state(&mut self, client_state: PokerClientState) {
-        self.client_state = Some(client_state);
+    pub fn player(&self) -> Result<&PokerBot, NetworkError> {
+        self.player
+            .as_deref()
+            .ok_or_else(|| NetworkError::from("network has no registered player"))
     }
 
-    pub fn client_state(&self) -> Result<&PokerClientState, NetworkError> {
-        self.client_state
-            .as_ref()
-            .ok_or_else(|| NetworkError::from("network has no poker client state"))
-    }
-
-    pub fn client_state_mut(&mut self) -> Result<&mut PokerClientState, NetworkError> {
-        self.client_state
-            .as_mut()
-            .ok_or_else(|| NetworkError::from("network has no poker client state"))
+    pub fn player_mut(&mut self) -> Result<&mut PokerBot, NetworkError> {
+        self.player
+            .as_deref_mut()
+            .ok_or_else(|| NetworkError::from("network has no registered player"))
     }
 
     pub async fn send_action(&mut self, wire: PokerActionEnvelopeWire) -> Result<(), NetworkError> {
@@ -277,56 +230,7 @@ impl<'player> PokerClientServerRuntime<'player> {
         &mut self,
         events: &[PlayerEvent],
     ) -> Result<(PokerActionEnvelopeWire, Vec<String>), NetworkError> {
-        let player = self
-            .player
-            .take()
-            .ok_or_else(|| NetworkError::from("network has no registered player"))?;
-        let mut player = player;
-        let result = player(self.client_state_mut()?, events);
-        self.player = Some(player);
-        result
-    }
-}
-
-pub struct NetworkPokerGameState<'state> {
-    client_state: &'state mut PokerClientState,
-    wire: Option<PokerActionEnvelopeWire>,
-    log_lines: Vec<String>,
-}
-
-impl<'state> NetworkPokerGameState<'state> {
-    fn new(client_state: &'state mut PokerClientState) -> Self {
-        Self {
-            client_state,
-            wire: None,
-            log_lines: Vec::new(),
-        }
-    }
-
-    fn into_wire(self) -> Result<(PokerActionEnvelopeWire, Vec<String>), NetworkError> {
-        let wire = self
-            .wire
-            .ok_or_else(|| NetworkError::from("player did not submit an action"))?;
-        Ok((wire, self.log_lines))
-    }
-}
-
-impl PokerGameState for NetworkPokerGameState<'_> {
-    type Error = PokerBotError;
-
-    fn table(&self) -> &PokerTable {
-        &self.client_state.table
-    }
-
-    fn submit_action(
-        &mut self,
-        action: PokerAction,
-        log_lines: Vec<String>,
-    ) -> Result<(), Self::Error> {
-        let envelope = self.client_state.submit_local_action(action)?;
-        self.wire = Some(envelope.to_wire(log_lines.clone()));
-        self.log_lines = log_lines;
-        Ok(())
+        self.player_mut()?.act_current_game(events)
     }
 }
 
@@ -362,8 +266,8 @@ impl From<Vec<u8>> for NetworkError {
     }
 }
 
-impl From<PokerBotError> for NetworkError {
-    fn from(value: PokerBotError) -> Self {
+impl From<PokerBotLogicError> for NetworkError {
+    fn from(value: PokerBotLogicError) -> Self {
         Self(value.to_string())
     }
 }

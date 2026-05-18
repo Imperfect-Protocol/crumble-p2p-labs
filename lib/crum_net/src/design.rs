@@ -333,14 +333,6 @@ where
     fn act(&mut self, state: &mut State, events: &[Event]) -> Result<(), Self::Error>;
 }
 
-pub trait PokerNetwork {
-    type Error;
-
-    fn install_poker_state(&mut self, state: PokerClientState) -> Result<(), Self::Error>;
-
-    fn mark_table_ready(&mut self) -> Result<(), Self::Error>;
-}
-
 pub trait PokerPlayerRegistrar<'player, P> {
     type Error;
 
