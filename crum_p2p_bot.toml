@@ -3,7 +3,7 @@ rpc_url = "http://localhost:8547"
 topology = "ring"
 
 [contracts]
-lobby = "0x347cd297a4e2a9ed682df8f99ba4786c77b1a8be"
-signal = "0x658f0042e8790c8b76bd43cd83e163130a72fded"
-verify_shuffle = "0x16d79fe99c908878d8c857d86f649d95f1f84a7f"
-verify_unmasking = "0x6a24d2bf02de046f06319d6f8f2608235d7977a0"
+lobby = "0x1a337c6d48bc0d19f913d16074d362d065564f86"
+signal = "0x73f68e1e4d02557e6cefd0292ffac13da5d18490"
+verify_shuffle = "0x1b9cbdc65a7bebb0be7f18d93a1896ea1fd46d7a"
+verify_unmasking = "0x841118047f42754332d0ad4db8a2893761dd7f5d"
